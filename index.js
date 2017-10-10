@@ -30,9 +30,7 @@ function GeoJSONNetworkParser(inFeatures, costProperty, normalizeCurves) {
     );
 
     this.nodes = [];
-    this.edges = [];
     this.intersections = [];
-    this.edgeGroups = [];
     this.graph = new DijkstraGraph();
     this.costProperty = costProperty;
     this.parsed = undefined;
@@ -65,14 +63,14 @@ GeoJSONNetworkParser.prototype = {
      */
     findShortestPath: function(a, b) {
         var ids = this.graph.path(a.id.toString(), b.id.toString());
-        
+
         if(ids === null) {
             return {nodes: [], coordinates: []}
         }
 
         var nodes = ids.map(id => { return this.nodes[parseInt(id)] });
         var coordinates = nodes.map(n => { return n.coordinates });
-        
+
         return {nodes: nodes, coordinates: coordinates};
     },
 
@@ -93,8 +91,7 @@ GeoJSONNetworkParser.prototype = {
 
         // Reset
         this.nodeTree = rbush();
-        this.edges.length = 0;
-        this.edgeGroups.length = 0;
+        // this.edgeGroups.length = 0;
         this.graph = new DijkstraGraph();
 
         // Pull out all unique nodes from the graph
@@ -102,84 +99,28 @@ GeoJSONNetworkParser.prototype = {
         // Filter nodes to get intersections and endpoints (order !== 2 i.e. not points along LineStrings)
         this.intersections = this.nodes.filter(n => { return n.edges.length !== 2 });
 
-        
+
         // Build a list of edges and add them to the graph
         this.nodes.forEach(startingNode => {
             var connections = {};
             startingNode.edges.forEach(startingEdge => {
-                var edge = {
-                    start: startingNode,
-                    end: startingEdge.nodeA === startingNode ? startingEdge.nodeB : startingEdge.nodeA,
-                    direction: startingEdge.nodeA === startingNode ? "B" : "A",
-                    distance: 0,
-                    cost: this.costProperty ? (startingEdge.parent.properties[this.costProperty] || 1) : 1
+                var end = startingEdge.nodeA === startingNode ? startingEdge.nodeB : startingEdge.nodeA;
+                if (!startingEdge.distance) {
+                    // only compute distance for edge once
+                    startingEdge.distance = turf.distance(turf.point(startingEdge.a), turf.point(startingEdge.b), "meters");
+                    startingEdge.cost = this.costProperty ? (startingEdge.parent.properties[this.costProperty] || 1) : 1;
                 }
-                
-                edge.distance = turf.distance(turf.point(startingEdge.a), turf.point(startingEdge.b), "meters");
-                if(edge.distance > 0) {
-                    this.edges.push(edge);
 
+                if(startingEdge.distance > 0) {
                     // Save in format that we can add as a connection in the DijkstraGraph
-                    connections[edge.end.id.toString()] = edge.distance * edge.cost;
+                    connections[end.id.toString()] = startingEdge.distance * startingEdge.cost;
                 }
             });
             // Add this node with its connections to the graph
             this.graph.addNode(startingNode.id.toString(), connections);
         });
 
-        // Walk between all intersections to bin edges into groups for easy interaction
-        this.intersections.forEach(startingNode => {
-            // Walk from each intersection until we find another intersection
-            // Add up length as we walk
-            startingNode.edges.forEach((startingEdge) => {
-                var nextNode = startingEdge.nodeA === startingNode ? startingEdge.nodeB : startingEdge.nodeA;
-                var lastNode = startingNode;
-                var nextEdge = startingEdge;
-                var edgeGroup = {
-                    start: startingNode,
-                    segments: [nextEdge],
-                    direction: startingNode === startingEdge.nodeB ? "B" : "A",
-                    distance: 0,
-                    lineStringCoordinates: [startingNode.coordinates, nextNode.coordinates]
-                }
-                
-                // Add a link from the segment back to the parent edge
-                if (!startingEdge.parentEdges) startingEdge.parentEdges = [edgeGroup];
-                else startingEdge.parentEdges.push(edgeGroup);
-
-                // Add this segment's distance to the total
-                edgeGroup.distance += turf.distance(turf.point(startingEdge.a), turf.point(startingEdge.b), "meters");
-
-                while(nextNode.edges.length === 2) {
-                    // Not an intersection-- continue on
-                    lastNode = nextNode;
-
-                    // Get the next edge and node
-                    nextEdge = nextNode.edges[0] === nextEdge ? nextNode.edges[1] : nextNode.edges[0];
-                    nextNode = nextEdge.nodeA === nextNode ? nextEdge.nodeB : nextEdge.nodeA;
-                    edgeGroup.segments.push(nextEdge);
-
-                    edgeGroup.lineStringCoordinates.push(nextNode.coordinates);
-
-                    // Add a link from the segment back to the parent edge
-                    if (!nextEdge.parentEdges) nextEdge.parentEdges = [edgeGroup];
-                    else nextEdge.parentEdges.push(edgeGroup);
-
-                    // Add this segment's distance to the total
-                    edgeGroup.distance += turf.distance(turf.point(nextEdge.a), turf.point(nextEdge.b), "meters");
-
-                    // Break cyclical rings
-                    if(nextNode === startingNode) break;
-                }
-
-                edgeGroup.end = nextNode
-                edgeGroup.id = this.edgeGroups.length;
-                if(edgeGroup.distance > 0)       // Ignore 0 length edges
-                    this.edgeGroups.push(edgeGroup);
-            });
-        });
-
-        this.parsed = {nodes: this.nodes, edges: this.edges, edgeGroups: this.edgeGroups, segments: this.lineSegments};
+        this.parsed = {nodes: this.nodes, segments: this.lineSegments};
         return this.parsed;
     },
     _explodeSegments: function(normalizeCurves) {
@@ -211,7 +152,7 @@ GeoJSONNetworkParser.prototype = {
                             });
                         }
                     }
-                    
+
                     s = s.concat(normalizedSegments);
                     distanceSinceLastSegment = 0;
                     lastSegmentEnd = end;
@@ -225,7 +166,7 @@ GeoJSONNetworkParser.prototype = {
                 segments = segments.concat(getSegments(f.geometry.coordinates, f));
                 // segments = segments.concat(getSegments(normalized.geometry.coordinates, f));
             }
-            else if(f.geometry.type === "Polygon") {
+            else if(f.geometry.type === "Polygon" || f.geometry.type === "MultiLineString") {
                 f.geometry.coordinates.forEach((ring) => {
                     segments = segments.concat(getSegments(ring, f));
                 })
@@ -238,58 +179,56 @@ GeoJSONNetworkParser.prototype = {
 
         return segments;
     },
-    _findNodes: function(tolerance, ignoreCrossings) {
-        var nodes = [];
-        
-        var assignEdgesToNode = (point, s1, s2) => {
-            var neighbors = this.nodeTree.search({
-                minX: point[0] - tolerance,
-                maxX: point[0] + tolerance,
-                minY: point[1] - tolerance,
-                maxY: point[1] + tolerance
+    _findNearestNode: function(point, tolerance) {
+        var neighbors = this.nodeTree.search({
+            minX: point[0] - tolerance,
+            maxX: point[0] + tolerance,
+            minY: point[1] - tolerance,
+            maxY: point[1] + tolerance
+        });
+        if (neighbors.length === 0) return null;
+
+        var sorted = neighbors.sort((a, b) => {
+            var dXA = point[0] - a.minX;
+            var dYA = point[1] - a.minY;
+            var dXB = point[0] - b.minX;
+            var dYB = point[1] - b.minY;
+            var dA = dXA * dXA + dYA + dYA;
+            var dB = dXB * dXB + dYB + dYB;
+            return dA - dB;
+        });
+
+        return sorted[0].node;
+    },
+    _assignEdgesToNode: function(point, edges, tolerance) {
+        var node = this._findNearestNode(point, tolerance);
+        if(node) {
+            edges.forEach((s) => {
+                if(node.edges.indexOf(s) === -1) node.edges.push(s);
             });
 
-            var node;
-            if(neighbors.length > 0) { 
-                // Sort neighbors by distance
-                var sorted = neighbors.sort((a, b) => {
-                    var dXA = point[0] - a.minX;
-                    var dYA = point[1] - a.minY;
-                    var dXB = point[0] - b.minX;
-                    var dYB = point[1] - b.minY;
-                    var dA = dXA * dXA + dYA + dYA;
-                    var dB = dXB * dXB + dYB + dYB;
-                    return dA - dB;
-                });
-
-                node = sorted[0].node; // Closest match
-                if(s1 !== undefined && node.edges.indexOf(s1) === -1)
-                    node.edges.push(s1);
-                if(s2 !== undefined && node.edges.indexOf(s2) === -1)
-                    node.edges.push(s2);
-
-                return node;
-            }
-            else {
-                // No neighbors --> create a new node
-                node = {
-                    coordinates: point,
-                    edges: [s1]
-                }
-
-                if(s2 !== undefined) node.edges.push(s2);
-
-                this.nodeTree.insert({
-                    minX: point[0],
-                    maxX: point[0],
-                    minY: point[1],
-                    maxY: point[1],
-                    node: node
-                });
-
-                return node;
-            }
+            return node;
         }
+        else {
+            // No neighbors --> create a new node
+            node = {
+                coordinates: point,
+                edges: edges
+            }
+
+            this.nodeTree.insert({
+                minX: point[0],
+                maxX: point[0],
+                minY: point[1],
+                maxY: point[1],
+                node: node
+            });
+
+            return node;
+        }
+    },
+    _findNodes: function(tolerance, ignoreCrossings) {
+        var nodes = [];
 
         var splitSegment = (segment, atCoords) => {
 
@@ -386,20 +325,20 @@ GeoJSONNetworkParser.prototype = {
                             else if(nearEnough(s2.a, intersection.geometry.coordinates, tolerance)) {
                                 // T-intersection: Split s1, assign new two new edges and s2 to node at s2.a
                                 const newSegments = splitSegment(s1, s2.a);
-                                // var n = assignEdgesToNode(s2.a, newSegments[0], newSegments[1]);
+                                // var n = this._assignEdgesToNode(s2.a, [newSegments[0], newSegments[1]], tolerance);
                                 // upsertNode(n);
                             }
                             else if(nearEnough(s2.b, intersection.geometry.coordinates, tolerance)) {
                                 // T-intersection: Split s1, assign new two new edges and s2 to node at s2.b
                                 const newSegments = splitSegment(s1, s2.b);
-                                // var n = assignEdgesToNode(s2.b, newSegments[0], newSegments[1]);
+                                // var n = this._assignEdgesToNode(s2.b, [newSegments[0], newSegments[1]], tolerance);
                                 // upsertNode(n);
                             }
                             else {
                                 // X-intersection: Split s1 and s2, assign four new edges to new node at intersection point
                                 const newSegments1 = splitSegment(s1, intersection.geometry.coordinates);
                                 const newSegments2 = splitSegment(s2, intersection.geometry.coordinates);
-                                
+
                             }
                         }
                     }
@@ -422,13 +361,13 @@ GeoJSONNetworkParser.prototype = {
                 // 1. Check endpoints
                 if (nearEnough(s1.a, s2.a, tolerance) || nearEnough(s1.a, s2.b, tolerance)) {
                     aMatched = true;
-                    var n = assignEdgesToNode(s1.a, s1, s2);
+                    var n = this._assignEdgesToNode(s1.a, [s1, s2], tolerance);
                     s1.nodeA = n;
                     upsertNode(n);
                 }
                 else if (nearEnough(s1.b, s2.b, tolerance) || nearEnough(s1.b, s2.a, tolerance)) {
                     bMatched = true;
-                    var n = assignEdgesToNode(s1.b, s1, s2);
+                    var n = this._assignEdgesToNode(s1.b, [s1, s2], tolerance);
                     s1.nodeB = n;
                     upsertNode(n);
                 }
@@ -436,7 +375,7 @@ GeoJSONNetworkParser.prototype = {
 
             // 3. If a or b endpoint isn't matched, add in as a node anyway
             if(!aMatched) {
-                var n = assignEdgesToNode(s1.a, s1);
+                var n = this._assignEdgesToNode(s1.a, [s1], tolerance);
                 s1.nodeA = n;
                 if(nodes.indexOf(n) === -1) {
                     n.id = nodes.length;
@@ -444,7 +383,7 @@ GeoJSONNetworkParser.prototype = {
                 }
             }
             if(!bMatched) {
-                var n = assignEdgesToNode(s1.b, s1);
+                var n = this._assignEdgesToNode(s1.b, [s1], tolerance);
                 s1.nodeB = n;
                 if(nodes.indexOf(n) === -1) {
                     n.id = nodes.length;
@@ -454,15 +393,73 @@ GeoJSONNetworkParser.prototype = {
         });
 
         return nodes;
-    }
+    },
+	appendNetwork: function(network, options) {
+        var t0 = new Date();
+        if(options === undefined) {
+            options = {};
+        }
+
+        var tolerance = options.tolerance === undefined ? 0.00000001 : options.tolerance;
+
+        this.originalFeatures = this.originalFeatures.concat(network.originalFeatures);
+
+        // create nodes
+        var nodeIdMappings = {};
+        network.nodes.forEach(node => {
+            var existingNode = this._findNearestNode(node.coordinates, tolerance);
+            if (existingNode) {
+                nodeIdMappings[node.id] = existingNode.id;
+            } else {
+                var point = node.coordinates;
+                var newNode = {id: this.nodes.length, coordinates: node.coordinates, edges: [] };
+                this.nodeTree.insert({
+                    minX: point[0],
+                    maxX: point[0],
+                    minY: point[1],
+                    maxY: point[1],
+                    node: newNode
+                });
+                this.nodes.push(newNode);
+                nodeIdMappings[node.id] = newNode.id;
+            }
+        });
+
+        // update list of edges attached to nodes
+        network.lineSegments.forEach(edge => {
+            var newEdge = Object.assign({}, edge, {
+                id: this.lineSegments.length,
+                nodeA: edge.nodeA && this.nodes[nodeIdMappings[edge.nodeA.id]],
+                nodeB: edge.nodeB && this.nodes[nodeIdMappings[edge.nodeB.id]]
+            });
+            if (newEdge.nodeA) newEdge.nodeA.edges.push(newEdge);
+            if (newEdge.nodeB) newEdge.nodeB.edges.push(newEdge);
+            this.lineSegments.push(edge);
+        });
+
+        // update graph
+        network.nodes.forEach(node => {
+            var startingNode = this.nodes[nodeIdMappings[node.id]];
+            var connections = {};
+            startingNode.edges.forEach(startingEdge => {
+                var end = startingEdge.nodeA === startingNode ? startingEdge.nodeB : startingEdge.nodeA;
+                if(startingEdge.distance > 0) {
+                    connections[end.id.toString()] = startingEdge.distance * startingEdge.cost;
+                }
+            });
+            this.graph.addNode(startingNode.id.toString(), connections);
+        });
+
+        this.intersections = this.nodes.filter(n => { return n.edges.length !== 2 });
+	}
 }
 
 
 function nearEnough(a, b, tolerance) {
     var dX = a[0] - b[0];
     var dY = a[1] - b[1];
-    var dist = Math.sqrt(dX * dX + dY * dY);
-    return dist <= tolerance;
+    var distSquared = dX * dX + dY * dY;
+    return distSquared <= (tolerance * tolerance);
 }
 
 function boundingBoxFromSegment(s, buffer) {
