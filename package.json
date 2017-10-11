@@ -1,6 +1,6 @@
 {
   "name": "@naturalatlas/geojson-network-parser",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A utility that turns a GeoJSON FeatureCollection of a road network and turns it into a routable graph",
   "main": "index.js",
   "scripts": {
