@@ -1,14 +1,23 @@
-# A utility that turns a GeoJSON FeatureCollection of a road network and turns it into a routable graph
+# geojson-network-parser
+
+A utility that turns a GeoJSON FeatureCollection of a road network and turns it into a routable graph. Fork of [kronick/geojson-network-parser@0.1.3](https://github.com/kronick/geojson-network-parser) by [Sam Kronick](https://github.com/kronick).
+
+### Changes
+
+- Leaner dependencies
+- Added `appendNetwork()` method for merging two parsed networks
+- Removed `network.edges` and `network.edgeGroups` (not needed for our case)
 
 ## Installation
 
-`npm install geojson-network-parser`
+```sh
+$ npm install @naturalatlas/geojson-network-parser
+```
 
 ## Usage
 
-```
-const NetworkParser = require('geojson-network-parser');
-
+```js
+import NetworkParser from 'geojson-network-parser';
 
 var geojson = {
     type: 'FeatureCollection',
@@ -36,8 +45,7 @@ const network = new NetworkParser(roads, "cost", 2);
 const parsed = network.parse({
   tolerance: 0.0000075,   // Ignore gaps greater than this distance. Units are in degrees latitude, so values < 0.00002 are a good starting point.
   ignoreCrossings: false  // If `true`, intersections will only be added where there are two nearby points in the original FeatureCollection. If `false`, intersections will be inferred where two edge segments cross each other.
-}); 
-
+});
 
 // Snap latitude/longitude point to nearest node on the network
 const A = network.getNearestNode([-37.231312, 32.4444]);
@@ -45,16 +53,4 @@ const B = network.getNearestNode([-37.23111, 32.5534]);
 
 // Get a list of nodes that connect the shortest path between two points
 const route = network.findShortestPath(A, B);
-
 ```
-
-## Building from source
-
-Clone this repo then run:
-
-```
-npm install
-npm run build
-```
-
-This will output a bundled js file to `dist/geojson-network-parser.js`.

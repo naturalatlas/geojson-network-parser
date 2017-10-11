@@ -1,7 +1,19 @@
 const rbush = require('rbush');
 const knn = require('rbush-knn');
-const turf = require('@turf/turf');
 const DijkstraGraph = require('node-dijkstra');
+const lineIntersect = require('@turf/line-intersect').default;
+
+function distance(pt1, pt2) {
+    var toRad = Math.PI / 180;
+    var dLat = toRad * (pt2[1] - pt1[1]);
+    var dLon = toRad * (pt2[0] - pt1[0]);
+    var lat1 = toRad * (pt1[1]);
+    var lat2 = toRad * (pt2[1]);
+    var a = Math.pow(Math.sin(dLat / 2), 2) + Math.pow(Math.sin(dLon / 2), 2) * Math.cos(lat1) * Math.cos(lat2);
+    var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    var R = 6373 * 1000;
+    return R * c;
+}
 
 /**
  * A utility module that turns an array of GeoJSON `LineString` features representing a road or path network and turns it into a routable graph.
@@ -49,7 +61,7 @@ GeoJSONNetworkParser.prototype = {
         neighbors = neighbors.map(n => {
             return {
                 node: n.node,
-                distance: turf.distance(turf.point(n.node.coordinates), turf.point(lnglat), "meters")
+                distance: distance(n.node.coordinates, lnglat),
             }
         });
         return n > 1 ? neighbors : neighbors[0];
@@ -107,7 +119,7 @@ GeoJSONNetworkParser.prototype = {
                 var end = startingEdge.nodeA === startingNode ? startingEdge.nodeB : startingEdge.nodeA;
                 if (!startingEdge.distance) {
                     // only compute distance for edge once
-                    startingEdge.distance = turf.distance(turf.point(startingEdge.a), turf.point(startingEdge.b), "meters");
+                    startingEdge.distance = distance(startingEdge.a, startingEdge.b);
                     startingEdge.cost = this.costProperty ? (startingEdge.parent.properties[this.costProperty] || 1) : 1;
                 }
 
@@ -130,7 +142,7 @@ GeoJSONNetworkParser.prototype = {
             var distanceSinceLastSegment = 0;
             var lastSegmentEnd = coordinates[0];
             for (var i = 0; i < coordinates.length - 1; i++) {
-                distanceSinceLastSegment +=  turf.distance(turf.point(coordinates[i]), turf.point(coordinates[i+1]), "meters");
+                distanceSinceLastSegment += distance(coordinates[i], coordinates[i+1]);
                 if(distanceSinceLastSegment >= normalizeCurves || i === coordinates.length - 2) {
                     var start = lastSegmentEnd;
                     var end = coordinates[i+1];
@@ -309,7 +321,7 @@ GeoJSONNetworkParser.prototype = {
                         var seg2 = {type: "Feature", geometry: {type: "LineString", coordinates: [s2.a, s2.b]}};
                         seg1 = extendSegment(seg1);
                         seg2 = extendSegment(seg2);
-                        const intersections = turf.lineIntersect(seg1, seg2);
+                        const intersections = lineIntersect(seg1, seg2);
                         if(intersections !== undefined && intersections.features.length > 0 && intersections.features[0].geometry.type === "Point") {
                             const intersection = intersections.features[0];
                             if(nearEnough(s1.a, intersection.geometry.coordinates, tolerance)) {
