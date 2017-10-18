@@ -1,4 +1,10 @@
-.PHONY: release
+.PHONY: release clean
+
+default: clean
+	npm run build
+
+clean:
+	rm -rf dist
 
 release:
 ifeq ($(strip $(version)),)
