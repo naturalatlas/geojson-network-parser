@@ -9,12 +9,13 @@ module.exports = {
 		filename: 'index.js',
 		libraryTarget: 'commonjs-module',
 	},
-	externals: [nodeExternals()],
+	externals: [nodeExternals({
+		whitelist: ['node-dijkstra']
+	})],
 	module: {
 		rules: [
 			{
 				test: /\.js$/,
-				exclude: /node_modules/,
 				use: {
 					loader: 'babel-loader',
 					options: {
