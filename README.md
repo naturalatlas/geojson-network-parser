@@ -6,6 +6,8 @@ A utility that turns a GeoJSON FeatureCollection of a road network and turns it 
 
 - Leaner dependencies
 - Added `appendNetwork()` method for merging two parsed networks
+- Added `toJSON()` method to convert graph to serializable JSON
+- Added static 'fromJSON()' method to restore graph from JSON
 - Removed `network.edges` and `network.edgeGroups` (not needed for our case)
 
 ## Installation
@@ -53,4 +55,8 @@ const B = network.getNearestNode([-37.23111, 32.5534]);
 
 // Get a list of nodes that connect the shortest path between two points
 const route = network.findShortestPath(A, B);
+
+// Saving example
+const json = network.toJSON();
+const restoredNetwork = NetworkParser.fromJSON(json);
 ```
