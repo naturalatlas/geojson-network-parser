@@ -111,6 +111,10 @@ GeoJSONNetworkParser.prototype = {
         // Filter nodes to get intersections and endpoints (order !== 2 i.e. not points along LineStrings)
         this.intersections = this.nodes.filter(n => { return n.edges.length !== 2 });
 
+        this.lineSegments.forEach((edge, i) => {
+            // splitting segments leaves some segments without ids... add them back
+            edge.id = i;
+        });
 
         // Build a list of edges and add them to the graph
         this.nodes.forEach(startingNode => {
@@ -463,9 +467,85 @@ GeoJSONNetworkParser.prototype = {
         });
 
         this.intersections = this.nodes.filter(n => { return n.edges.length !== 2 });
-	}
+	},
+    toJSON: function() {
+        return {
+            features: this.originalFeatures,
+            nodes: this.nodes.map(node => {
+                return {
+                    coordinates: node.coordinates,
+                    edgeIds: node.edges.map(edge => edge.id)
+                };
+            }),
+            edges: this.lineSegments.map(edge => {
+                if (!edge.nodeA || !edge.nodeB) console.log(edge)
+                return {
+                    parentFeatureId: edge.parent && this.originalFeatures.indexOf(edge.parent),
+                    nodeIdA: edge.nodeA && edge.nodeA.id,
+                    nodeIdB: edge.nodeB && edge.nodeB.id,
+                    cost: edge.cost,
+                    distance: edge.distance
+                }
+            })
+        };
+    }
 }
 
+GeoJSONNetworkParser.fromJSON = function(json) {
+    var network = new GeoJSONNetworkParser([]);
+    network.nodeTree = rbush();
+    network.graph = new DijkstraGraph();
+    network.originalFeatures = json.features;
+    network.lineSegments = json.edges.map((edge, id) => {
+        return {
+            id: id,
+            parent: network.originalFeatures[edge.parentFeatureId],
+            nodeA: edge.nodeIdA, // reassigned to actual node below
+            nodeB: edge.nodeIdB, // reassigned to actual node below
+            cost: edge.cost,
+            distance: edge.distance
+        };
+    });
+    network.nodes = json.nodes.map((node, id) => {
+        return {
+            id: id,
+            coordinates: node.coordinates,
+            edges: node.edgeIds.map(edgeId => {
+                if (!network.lineSegments[edgeId]) console.log('not found:' + edgeId)
+                return network.lineSegments[edgeId]
+            })
+        };
+    });
+    network.lineSegments.forEach(edge => {
+    if (!network.nodes[edge.nodeA] || !network.nodes[edge.nodeB]) console.log(edge);
+        edge.nodeA = network.nodes[edge.nodeA];
+        edge.nodeB = network.nodes[edge.nodeB];
+        edge.a = edge.nodeA.coordinates;
+        edge.b = edge.nodeB.coordinates;
+    });
+    network.nodes.forEach(node => {
+        var point = node.coordinates;
+        network.nodeTree.insert({
+            minX: point[0],
+            maxX: point[0],
+            minY: point[1],
+            maxY: point[1],
+            node: node
+        });
+        var connections = {};
+        node.edges.forEach(startingEdge => {
+            var end = startingEdge.nodeA === node ? startingEdge.nodeB : startingEdge.nodeA;
+            if(startingEdge.distance > 0) {
+                connections[end.id.toString()] = startingEdge.distance * startingEdge.cost;
+            }
+        });
+        // Add this node with its connections to the graph
+        network.graph.addNode(node.id.toString(), connections);
+    });
+    network.intersections = network.nodes.filter(n => { return n.edges.length !== 2 });
+
+    return network;
+}
 
 function nearEnough(a, b, tolerance) {
     var dX = a[0] - b[0];
