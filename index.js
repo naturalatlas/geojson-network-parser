@@ -469,6 +469,12 @@ GeoJSONNetworkParser.prototype = {
         this.intersections = this.nodes.filter(n => { return n.edges.length !== 2 });
 	},
     toJSON: function() {
+        this.nodes.forEach((node, i) => {
+            node.id = i;
+        });
+        this.lineSegments.forEach((edge, i) => {
+            edge.id = i;
+        });
         return {
             features: this.originalFeatures,
             nodes: this.nodes.map(node => {
@@ -478,7 +484,6 @@ GeoJSONNetworkParser.prototype = {
                 };
             }),
             edges: this.lineSegments.map(edge => {
-                if (!edge.nodeA || !edge.nodeB) console.log(edge)
                 return {
                     parentFeatureId: edge.parent && this.originalFeatures.indexOf(edge.parent),
                     nodeIdA: edge.nodeA && edge.nodeA.id,
