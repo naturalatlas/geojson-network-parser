@@ -516,12 +516,6 @@ GeoJSONNetworkParser.prototype = {
     }
 }
 
-function writePseudoFloatField(field, value) {
-    var x =
-    pbf.writeSVarintField(iField, Math.floor(value));
-    pbf.writeSVarintField(fField, Math.floor(value));
-}
-
 function encodeNodePBF(node, pbf) {
     pbf.writeFloatField(1, node.coordinates[1]);
     pbf.writeFloatField(2, node.coordinates[0]);
