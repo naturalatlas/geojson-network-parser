@@ -1,0 +1,23 @@
+import "node_modules/geobuf/geobuf.proto";
+
+option optimize_for = LITE_RUNTIME;
+
+message Network {
+    required Data features = 1;
+    repeated Node nodes = 2;
+    repeated Edge edges = 3;
+
+    message Node {
+        required float latitude = 1;
+        required float longitude = 2;
+        repeated uint32 edgeIds = 3;
+    }
+
+    message Edge {
+        required uint32 parentFeatureId = 1;
+        required uint32 nodeIdA = 2;
+        required uint32 nodeIdB = 3;
+        required float cost = 4;
+        required float distance = 5;
+    }
+}

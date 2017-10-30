@@ -8,6 +8,8 @@ A utility that turns a GeoJSON FeatureCollection of a road network and turns it 
 - Added `appendNetwork()` method for merging two parsed networks
 - Added `toJSON()` method to convert graph to serializable JSON
 - Added static 'fromJSON()' method to restore graph from JSON
+- Added `toPBF()` method to convert graph to protobuf
+- Added static 'fromPBF()' method to restore graph from protobuf
 - Removed `network.edges` and `network.edgeGroups` (not needed for our case)
 
 ## Installation

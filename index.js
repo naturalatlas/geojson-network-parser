@@ -2,6 +2,8 @@ const rbush = require('rbush');
 const knn = require('rbush-knn');
 const DijkstraGraph = require('node-dijkstra');
 const lineIntersect = require('@turf/line-intersect').default;
+const PBF = require('pbf');
+const geobuf = require('geobuf');
 
 function distance(pt1, pt2) {
     var toRad = Math.PI / 180;
@@ -110,11 +112,6 @@ GeoJSONNetworkParser.prototype = {
         this.nodes = this._findNodes(options.tolerance, options.ignoreCrossings);
         // Filter nodes to get intersections and endpoints (order !== 2 i.e. not points along LineStrings)
         this.intersections = this.nodes.filter(n => { return n.edges.length !== 2 });
-
-        this.lineSegments.forEach((edge, i) => {
-            // splitting segments leaves some segments without ids... add them back
-            edge.id = i;
-        });
 
         // Build a list of edges and add them to the graph
         this.nodes.forEach(startingNode => {
@@ -493,7 +490,75 @@ GeoJSONNetworkParser.prototype = {
                 }
             })
         };
+    },
+    toPBF: function(options) {
+        options = options || {};
+        var json = this.toJSON();
+        var pbf = new PBF();
+        var features = json.features;
+
+        if (options.keepFeatureCoordinates !== true) {
+            features = features.map(feature => {
+                return {type: 'Feature', properties: feature.properties, geometry: {type: 'LineString', coordinates: []}};
+            });
+        }
+        json.nodes.forEach(node => {
+            pbf.writeMessage(2, encodeNodePBF, node);
+        });
+        json.edges.forEach(node => {
+            pbf.writeMessage(3, encodeEdgePBF, node);
+        });
+        pbf.writeMessage(1, geobuf.encode, {
+            type: 'FeatureCollection',
+            features: features
+        });
+        return Buffer.from(pbf.finish());
     }
+}
+
+function writePseudoFloatField(field, value) {
+    var x =
+    pbf.writeSVarintField(iField, Math.floor(value));
+    pbf.writeSVarintField(fField, Math.floor(value));
+}
+
+function encodeNodePBF(node, pbf) {
+    pbf.writeFloatField(1, node.coordinates[1]);
+    pbf.writeFloatField(2, node.coordinates[0]);
+    pbf.writePackedVarint(3, node.edgeIds);
+}
+
+function encodeEdgePBF(edge, pbf) {
+    pbf.writeVarintField(1, edge.parentFeatureId);
+    pbf.writeVarintField(2, edge.nodeIdA);
+    pbf.writeVarintField(3, edge.nodeIdB);
+    pbf.writeFloatField(4, (edge.cost || 0));
+    pbf.writeFloatField(5, (edge.distance || 0));
+}
+
+function readNodePBF(tag, data, pbf) {
+    if (tag === 1) data.coordinates[1] = pbf.readFloat();
+    else if (tag === 2) data.coordinates[0] = pbf.readFloat();
+    else if (tag === 3) data.edgeIds = pbf.readPackedVarint();
+}
+
+function readEdgePBF(tag, data, pbf) {
+    if (tag === 1) data.parentFeatureId = pbf.readVarint();
+    else if (tag === 2) data.nodeIdA = pbf.readVarint();
+    else if (tag === 3) data.nodeIdB = pbf.readVarint();
+    else if (tag === 4) data.cost = pbf.readFloat();
+    else if (tag === 5) data.distance = pbf.readFloat();
+}
+
+function readNetworkPBF(tag, data, pbf) {
+    if (tag === 1) data.features = geobuf.decode(pbf).features;
+    else if (tag === 2) data.nodes.push(pbf.readMessage(readNodePBF, {edgeIds: [], coordinates: []}));
+    else if (tag === 3) data.edges.push(pbf.readMessage(readEdgePBF, {}));
+}
+
+GeoJSONNetworkParser.fromPBF = function(buffer) {
+    var json = new PBF(buffer).readFields(readNetworkPBF, {nodes: [], features: [], edges: []});
+    return GeoJSONNetworkParser.fromJSON(json);
 }
 
 GeoJSONNetworkParser.fromJSON = function(json) {
@@ -516,13 +581,12 @@ GeoJSONNetworkParser.fromJSON = function(json) {
             id: id,
             coordinates: node.coordinates,
             edges: node.edgeIds.map(edgeId => {
-                if (!network.lineSegments[edgeId]) console.log('not found:' + edgeId)
+                // if (!network.lineSegments[edgeId]) console.log('not found:' + edgeId)
                 return network.lineSegments[edgeId]
             })
         };
     });
     network.lineSegments.forEach(edge => {
-    if (!network.nodes[edge.nodeA] || !network.nodes[edge.nodeB]) console.log(edge);
         edge.nodeA = network.nodes[edge.nodeA];
         edge.nodeB = network.nodes[edge.nodeB];
         edge.a = edge.nodeA.coordinates;
